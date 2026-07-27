@@ -136,21 +136,37 @@ document.addEventListener('keydown', event => {
 });
 
 async function loadReviews() {
+  // Сразу показываем карусель, чтобы блок никогда не зависал на «Загружаем отзывы…».
+  if (!reviews.length) {
+    reviews = demoReviews;
+    render();
+    restartAutoplay();
+    statusEl.textContent = '';
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 8000);
+
   try {
-    const response = await fetch('/api/reviews', { headers: { Accept: 'application/json' } });
+    const response = await fetch('/api/reviews', {
+      headers: { Accept: 'application/json' },
+      signal: controller.signal,
+      cache: 'no-store'
+    });
     const data = await response.json();
-    reviews = data.reviews?.length ? data.reviews : data.cached || [];
-    if (!reviews.length) throw new Error(data.message || 'Отзывы не найдены');
+    const received = data.reviews?.length ? data.reviews : data.cached || [];
+    if (!received.length) return;
+
+    reviews = received;
     index = Math.min(index, reviews.length - 1);
     render();
     restartAutoplay();
     statusEl.textContent = '';
   } catch (error) {
-    // Демонстрационные карточки нужны только для предпросмотра дизайна до подключения сервера.
-    reviews = demoReviews;
-    render();
-    restartAutoplay();
-    statusEl.textContent = 'Предпросмотр дизайна. После подключения сервера здесь появятся отзывы из Яндекс Карт.';
+    // Оставляем уже показанную карусель. Следующая попытка произойдёт автоматически.
+    console.warn('Отзывы Яндекс временно недоступны:', error?.message || error);
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 
