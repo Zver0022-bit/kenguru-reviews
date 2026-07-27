@@ -5,7 +5,252 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="color-scheme" content="dark" />
   <title>Отзывы гостей — Кенгуру</title>
-  <link rel="stylesheet" href="styles.css" />
+  <style>
+:root {
+  --text: #f5f5f7;
+  --muted: rgba(245, 245, 247, .62);
+  --accent: #ff5a16;
+  --card-bg: rgba(18, 18, 20, .74);
+  --card-line: rgba(255, 255, 255, .14);
+  --card-line-active: rgba(255, 255, 255, .48);
+  --shadow: 0 28px 80px rgba(0, 0, 0, .34);
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; min-height: 100%; background: transparent !important; }
+body { color: var(--text); font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; }
+button { font: inherit; }
+
+.reviews {
+  position: relative;
+  overflow: hidden;
+  padding: 12px 0 32px;
+  background: transparent;
+}
+
+.reviews__inner {
+  width: min(1480px, calc(100% - 28px));
+  margin: 0 auto;
+}
+
+.reviews__title {
+  margin: 0 0 48px;
+  text-align: center;
+  font-size: clamp(27px, 3.2vw, 52px);
+  line-height: 1;
+  font-weight: 850;
+  font-style: italic;
+  letter-spacing: -.035em;
+  text-transform: uppercase;
+  text-wrap: balance;
+}
+
+.reviews__title span { color: var(--accent); }
+
+.reviews__slider {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr) 58px;
+  align-items: center;
+  gap: 14px;
+}
+
+.reviews__viewport {
+  overflow: hidden;
+  padding: 44px 0 50px;
+  touch-action: pan-y;
+  -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 7%, #000 93%, transparent 100%);
+  mask-image: linear-gradient(90deg, transparent 0, #000 7%, #000 93%, transparent 100%);
+}
+
+.reviews__track {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  will-change: transform;
+  transition: transform .72s cubic-bezier(.2,.75,.25,1);
+}
+
+.review-card {
+  position: relative;
+  flex: 0 0 min(480px, 42vw);
+  min-height: 345px;
+  padding: 34px;
+  display: grid;
+  grid-template-columns: 112px 1fr;
+  grid-template-rows: auto 1fr auto;
+  column-gap: 28px;
+  row-gap: 22px;
+  border: 1px solid var(--card-line);
+  border-radius: 30px;
+  background: linear-gradient(145deg, rgba(35,35,38,.82), var(--card-bg));
+  box-shadow: 0 18px 50px rgba(0,0,0,.18), inset 0 1px rgba(255,255,255,.055);
+  backdrop-filter: blur(22px) saturate(120%);
+  -webkit-backdrop-filter: blur(22px) saturate(120%);
+  opacity: .46;
+  transform: scale(.82);
+  filter: saturate(.72);
+  transition: transform .72s cubic-bezier(.2,.75,.25,1), opacity .55s ease, filter .55s ease, border-color .55s ease, box-shadow .55s ease;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.review-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(135deg, rgba(255,255,255,.08), transparent 34%, transparent 72%, rgba(255,90,22,.035));
+}
+
+.review-card.is-near {
+  opacity: .72;
+  transform: scale(.91);
+  filter: saturate(.9);
+}
+
+.review-card.is-active {
+  z-index: 3;
+  opacity: 1;
+  transform: scale(1);
+  filter: none;
+  border-color: var(--card-line-active);
+  box-shadow: var(--shadow), inset 0 1px rgba(255,255,255,.11), 0 0 0 1px rgba(255,255,255,.04);
+}
+
+.review-card__avatar {
+  width: 112px;
+  height: 112px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: rgba(255,255,255,.08);
+  border: 1px solid rgba(255,255,255,.16);
+  align-self: start;
+}
+
+.review-card__avatar--placeholder {
+  display: grid;
+  place-items: center;
+  font-size: 40px;
+  font-weight: 750;
+  color: #fff;
+  background: linear-gradient(145deg, rgba(255,90,22,.42), rgba(255,255,255,.08));
+}
+
+.review-card__head { align-self: center; min-width: 0; }
+.review-card__name {
+  margin: 0 0 15px;
+  font-size: clamp(22px, 2vw, 30px);
+  line-height: 1.1;
+  font-weight: 720;
+  letter-spacing: -.025em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.review-card__stars {
+  color: var(--accent);
+  font-size: clamp(23px, 2.1vw, 32px);
+  line-height: 1;
+  letter-spacing: 3px;
+  white-space: nowrap;
+  text-shadow: 0 0 22px rgba(255,90,22,.16);
+}
+
+.review-card__text {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: rgba(245,245,247,.9);
+  font-size: clamp(17px, 1.55vw, 22px);
+  line-height: 1.58;
+  letter-spacing: -.01em;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.review-card__date {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1;
+  align-self: end;
+}
+
+.reviews__arrow {
+  width: 56px;
+  height: 56px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 2px solid var(--accent);
+  background: rgba(0,0,0,.12);
+  color: var(--accent);
+  cursor: pointer;
+  transition: transform .22s ease, background .22s ease, color .22s ease, opacity .22s ease;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.reviews__arrow span { font-size: 48px; line-height: .7; transform: translateY(-2px); }
+.reviews__arrow:hover { background: var(--accent); color: #fff; transform: scale(1.06); }
+.reviews__arrow:active { transform: scale(.96); }
+
+.reviews__dots {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 13px;
+  min-height: 18px;
+}
+
+.reviews__dot {
+  width: 9px;
+  height: 9px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255,255,255,.34);
+  cursor: pointer;
+  transition: width .28s ease, border-radius .28s ease, background .28s ease, transform .28s ease;
+}
+
+.reviews__dot.is-active { width: 28px; border-radius: 20px; background: var(--accent); }
+.reviews__status { min-height: 18px; margin: 16px 0 0; text-align: center; color: var(--muted); font-size: 13px; }
+
+@media (max-width: 900px) {
+  .reviews { padding-top: 10px; }
+  .reviews__title { margin-bottom: 20px; }
+  .reviews__slider { grid-template-columns: 44px minmax(0,1fr) 44px; gap: 4px; }
+  .reviews__viewport { padding: 34px 0 42px; -webkit-mask-image: none; mask-image: none; }
+  .reviews__arrow { width: 42px; height: 42px; }
+  .reviews__arrow span { font-size: 38px; }
+  .review-card { flex-basis: min(430px, 72vw); min-height: 330px; padding: 27px; grid-template-columns: 92px 1fr; column-gap: 20px; border-radius: 26px; }
+  .review-card__avatar { width: 92px; height: 92px; }
+}
+
+@media (max-width: 560px) {
+  .reviews { padding: 8px 0 24px; }
+  .reviews__inner { width: 100%; }
+  .reviews__title { padding: 0 18px; margin-bottom: 10px; font-size: clamp(24px, 8vw, 34px); }
+  .reviews__slider { grid-template-columns: 40px minmax(0,1fr) 40px; gap: 0; }
+  .reviews__viewport { padding: 28px 0 34px; }
+  .reviews__arrow { width: 36px; height: 36px; justify-self: center; z-index: 5; }
+  .reviews__arrow span { font-size: 33px; }
+  .review-card { flex-basis: calc(100vw - 98px); min-height: 315px; padding: 23px; grid-template-columns: 76px 1fr; row-gap: 18px; border-radius: 23px; }
+  .review-card__avatar { width: 76px; height: 76px; }
+  .review-card__name { font-size: 20px; margin-bottom: 10px; }
+  .review-card__stars { font-size: 21px; letter-spacing: 1px; }
+  .review-card__text { font-size: 16px; line-height: 1.5; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reviews__track, .review-card, .reviews__dot, .reviews__arrow { transition: none !important; }
+}
+
+  </style>
 </head>
 <body>
   <section class="reviews" aria-label="Отзывы гостей клуба Кенгуру">
@@ -28,6 +273,182 @@
       <p id="reviews-status" class="reviews__status">Загружаем отзывы…</p>
     </div>
   </section>
-  <script src="reviews.js" defer></script>
+  <script>
+const track = document.querySelector('#reviews-track');
+const viewport = document.querySelector('.reviews__viewport');
+const slider = document.querySelector('#reviews-slider');
+const dots = document.querySelector('#reviews-dots');
+const statusEl = document.querySelector('#reviews-status');
+const prev = document.querySelector('.reviews__arrow--prev');
+const next = document.querySelector('.reviews__arrow--next');
+
+let reviews = [];
+let index = 0;
+let autoplayId = null;
+let startX = null;
+let deltaX = 0;
+
+const escapeHtml = (value = '') => String(value).replace(/[&<>'"]/g, char => ({
+  '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
+}[char]));
+
+const demoReviews = [
+  { name: 'Мария', rating: 5, text: 'Тренеры внимательные, всегда подберут программу под цели и уровень. Очень приятная атмосфера и отличный клуб.', date: '18 мая 2025' },
+  { name: 'Алексей', rating: 5, text: 'Отличный клуб! Здесь тебя действительно понимают и создают классную атмосферу.', date: '15 мая 2025' },
+  { name: 'Дмитрий', rating: 5, text: 'Удобная запись, напоминания, приятные бонусы. Всё на высшем уровне.', date: '14 мая 2025' },
+  { name: 'Екатерина', rating: 5, text: 'Очень тёплое отношение к игрокам. Хочется приходить снова и снова!', date: '12 мая 2025' }
+];
+
+function render() {
+  track.innerHTML = reviews.map((review, cardIndex) => {
+    const name = escapeHtml(review.name || 'Гость');
+    const text = escapeHtml(review.text || '');
+    const date = escapeHtml(review.date || '');
+    const rating = Math.max(1, Math.min(5, Number(review.rating) || 5));
+    const avatar = review.avatar
+      ? `<img class="review-card__avatar" src="${escapeHtml(review.avatar)}" alt="${name}" loading="lazy">`
+      : `<div class="review-card__avatar review-card__avatar--placeholder" aria-hidden="true">${name[0] || 'Г'}</div>`;
+
+    return `<article class="review-card" data-index="${cardIndex}" tabindex="0" aria-label="Отзыв ${cardIndex + 1} из ${reviews.length}">
+      ${avatar}
+      <div class="review-card__head">
+        <h3 class="review-card__name">${name}</h3>
+        <div class="review-card__stars" aria-label="Оценка ${rating} из 5">${'★'.repeat(rating)}${'☆'.repeat(5 - rating)}</div>
+      </div>
+      <p class="review-card__text">${text}</p>
+      ${date ? `<div class="review-card__date">${date}</div>` : ''}
+    </article>`;
+  }).join('');
+
+  dots.innerHTML = reviews.map((_, dotIndex) =>
+    `<button class="reviews__dot" type="button" data-index="${dotIndex}" aria-label="Показать отзыв ${dotIndex + 1}"></button>`
+  ).join('');
+
+  track.querySelectorAll('.review-card').forEach(card => {
+    card.addEventListener('click', () => goTo(Number(card.dataset.index)));
+    card.addEventListener('keydown', event => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        goTo(Number(card.dataset.index));
+      }
+    });
+  });
+
+  dots.querySelectorAll('.reviews__dot').forEach(dot => {
+    dot.addEventListener('click', () => goTo(Number(dot.dataset.index)));
+  });
+
+  requestAnimationFrame(update);
+}
+
+function update() {
+  const cards = [...track.querySelectorAll('.review-card')];
+  if (!cards.length) return;
+
+  index = (index + cards.length) % cards.length;
+  const active = cards[index];
+  const viewportWidth = viewport.getBoundingClientRect().width;
+  const activeWidth = active.getBoundingClientRect().width;
+  const activeOffset = active.offsetLeft;
+  const target = activeOffset - (viewportWidth - activeWidth) / 2;
+  track.style.transform = `translate3d(${-target}px, 0, 0)`;
+
+  cards.forEach((card, cardIndex) => {
+    const distance = Math.abs(cardIndex - index);
+    card.classList.toggle('is-active', distance === 0);
+    card.classList.toggle('is-near', distance === 1);
+    card.setAttribute('aria-current', distance === 0 ? 'true' : 'false');
+  });
+
+  dots.querySelectorAll('.reviews__dot').forEach((dot, dotIndex) => {
+    dot.classList.toggle('is-active', dotIndex === index);
+    dot.setAttribute('aria-current', dotIndex === index ? 'true' : 'false');
+  });
+}
+
+function goTo(newIndex, restart = true) {
+  if (!reviews.length) return;
+  index = (newIndex + reviews.length) % reviews.length;
+  update();
+  if (restart) restartAutoplay();
+}
+
+function restartAutoplay() {
+  clearInterval(autoplayId);
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches || reviews.length < 2) return;
+  autoplayId = setInterval(() => goTo(index + 1, false), 5500);
+}
+
+prev.addEventListener('click', () => goTo(index - 1));
+next.addEventListener('click', () => goTo(index + 1));
+addEventListener('resize', update);
+
+slider.addEventListener('mouseenter', () => clearInterval(autoplayId));
+slider.addEventListener('mouseleave', restartAutoplay);
+slider.addEventListener('focusin', () => clearInterval(autoplayId));
+slider.addEventListener('focusout', restartAutoplay);
+
+viewport.addEventListener('pointerdown', event => {
+  startX = event.clientX;
+  deltaX = 0;
+  viewport.setPointerCapture?.(event.pointerId);
+  clearInterval(autoplayId);
+});
+viewport.addEventListener('pointermove', event => {
+  if (startX === null) return;
+  deltaX = event.clientX - startX;
+});
+viewport.addEventListener('pointerup', () => {
+  if (Math.abs(deltaX) > 48) goTo(index + (deltaX < 0 ? 1 : -1));
+  else restartAutoplay();
+  startX = null;
+  deltaX = 0;
+});
+viewport.addEventListener('pointercancel', restartAutoplay);
+
+document.addEventListener('keydown', event => {
+  if (event.key === 'ArrowLeft') goTo(index - 1);
+  if (event.key === 'ArrowRight') goTo(index + 1);
+});
+
+async function loadReviews() {
+  // Сразу показываем карусель, чтобы блок никогда не зависал на «Загружаем отзывы…».
+  if (!reviews.length) {
+    reviews = demoReviews;
+    render();
+    restartAutoplay();
+    statusEl.textContent = '';
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 8000);
+
+  try {
+    const response = await fetch('/api/reviews', {
+      headers: { Accept: 'application/json' },
+      signal: controller.signal,
+      cache: 'no-store'
+    });
+    const data = await response.json();
+    const received = data.reviews?.length ? data.reviews : data.cached || [];
+    if (!received.length) return;
+
+    reviews = received;
+    index = Math.min(index, reviews.length - 1);
+    render();
+    restartAutoplay();
+    statusEl.textContent = '';
+  } catch (error) {
+    // Оставляем уже показанную карусель. Следующая попытка произойдёт автоматически.
+    console.warn('Отзывы Яндекс временно недоступны:', error?.message || error);
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+loadReviews();
+setInterval(loadReviews, 30 * 60 * 1000);
+
+  </script>
 </body>
 </html>
