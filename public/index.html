@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="dark" />
+  <title>Отзывы гостей — Кенгуру</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <section class="reviews" aria-labelledby="reviews-title">
+    <div class="reviews__inner">
+      <h2 id="reviews-title" class="reviews__title">ЧТО ГОВОРЯТ <span>НАШИ ГОСТИ</span></h2>
+
+      <div class="reviews__slider" id="reviews-slider">
+        <button class="reviews__arrow reviews__arrow--prev" type="button" aria-label="Предыдущий отзыв">
+          <span aria-hidden="true">‹</span>
+        </button>
+
+        <div class="reviews__viewport">
+          <div id="reviews-track" class="reviews__track" aria-live="polite"></div>
+        </div>
+
+        <button class="reviews__arrow reviews__arrow--next" type="button" aria-label="Следующий отзыв">
+          <span aria-hidden="true">›</span>
+        </button>
+      </div>
+
+      <div id="reviews-dots" class="reviews__dots" aria-label="Навигация по отзывам"></div>
+      <p id="reviews-status" class="reviews__status">Загружаем отзывы…</p>
+    </div>
+  </section>
+  <script src="reviews.js" defer></script>
+</body>
+</html>
