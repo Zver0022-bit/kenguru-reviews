@@ -1,7 +1,12 @@
 import express from 'express';
 import { chromium } from 'playwright';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
 const app = express();
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const PUBLIC_DIR = path.join(__dirname, 'public');
 const PORT = process.env.PORT || 3000;
 const ORGANIZATION_URL = process.env.YANDEX_ORG_URL ||
   'https://yandex.ru/maps/org/kenguru/158191390944/?indoorLevel=1&ll=39.717231%2C47.284135&z=17';
@@ -157,7 +162,11 @@ async function getReviews(force = false) {
   return activeRequest;
 }
 
-app.use(express.static('public'));
+app.use(express.static(PUBLIC_DIR));
+
+app.get('/', (req, res) => {
+  res.sendFile(path.join(PUBLIC_DIR, 'index.html'));
+});
 
 app.get('/api/reviews', async (req, res) => {
   try {
