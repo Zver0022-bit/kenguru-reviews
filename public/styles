@@ -16,7 +16,7 @@ button { font: inherit; }
 .reviews {
   position: relative;
   overflow: hidden;
-  padding: 42px 0 32px;
+  padding: 12px 0 32px;
   background: transparent;
 }
 
@@ -213,7 +213,7 @@ button { font: inherit; }
 .reviews__status { min-height: 18px; margin: 16px 0 0; text-align: center; color: var(--muted); font-size: 13px; }
 
 @media (max-width: 900px) {
-  .reviews { padding-top: 32px; }
+  .reviews { padding-top: 10px; }
   .reviews__title { margin-bottom: 20px; }
   .reviews__slider { grid-template-columns: 44px minmax(0,1fr) 44px; gap: 4px; }
   .reviews__viewport { padding: 34px 0 42px; -webkit-mask-image: none; mask-image: none; }
@@ -224,7 +224,7 @@ button { font: inherit; }
 }
 
 @media (max-width: 560px) {
-  .reviews { padding: 22px 0 24px; }
+  .reviews { padding: 8px 0 24px; }
   .reviews__inner { width: 100%; }
   .reviews__title { padding: 0 18px; margin-bottom: 10px; font-size: clamp(24px, 8vw, 34px); }
   .reviews__slider { grid-template-columns: 40px minmax(0,1fr) 40px; gap: 0; }
