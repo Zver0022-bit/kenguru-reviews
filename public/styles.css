@@ -1,1 +1,176 @@
-*{box-sizing:border-box}html,body{margin:0;background:transparent!important;color:#fff;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif}body{overflow-x:hidden}.reviews{position:relative;width:100%;max-width:1150px;height:430px;margin:0 auto;padding:30px 64px 48px;overflow:hidden;background:transparent!important}.reviews__viewport{height:310px;overflow:hidden;background:transparent}.reviews__track{display:flex;align-items:center;gap:20px;height:100%;will-change:transform;transition:transform .7s cubic-bezier(.22,1,.36,1)}.review-card{flex:0 0 min(520px,70vw);min-height:230px;padding:25px;border:1px solid rgba(255,255,255,.13);border-radius:25px;background:linear-gradient(145deg,rgba(255,255,255,.12),rgba(255,255,255,.045));box-shadow:0 18px 55px rgba(0,0,0,.18);opacity:.5;transform:scale(.88);transition:opacity .55s,transform .55s,border-color .55s;cursor:pointer}.review-card.is-near{opacity:.72;transform:scale(.94)}.review-card.is-active{opacity:1;transform:scale(1);border-color:rgba(255,102,28,.55)}.review-card__top{display:flex;align-items:center;gap:14px}.review-card__avatar{width:54px;height:54px;border-radius:50%;object-fit:cover;background:rgba(255,255,255,.08)}.review-card__avatar--placeholder{display:grid;place-items:center;font-weight:700;font-size:21px;color:#ff641c}.review-card__name{margin:0 0 5px;font-size:19px}.review-card__stars{color:#ff641c;letter-spacing:1px;font-size:17px}.review-card__text{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:5;overflow:hidden;margin:18px 0 14px;font-size:16px;line-height:1.48;color:rgba(255,255,255,.92)}.review-card__date{font-size:13px;color:rgba(255,255,255,.52)}.reviews__arrow{position:absolute;z-index:5;top:157px;width:46px;height:58px;padding:0;border:0;border-radius:0;background:transparent!important;color:#ff641c;font-size:58px;font-weight:200;line-height:48px;cursor:pointer;text-shadow:0 2px 14px rgba(0,0,0,.35);transition:transform .2s,opacity .2s}.reviews__arrow:hover{transform:scale(1.12);opacity:.85}.reviews__arrow:focus-visible{outline:2px solid #ff641c;outline-offset:2px}.reviews__arrow--prev{left:12px}.reviews__arrow--next{right:12px}.reviews__dots{display:flex;justify-content:center;gap:7px;min-height:12px;margin-top:9px}.reviews__dot{width:6px;height:6px;padding:0;border:0;border-radius:99px;background:rgba(255,255,255,.25);transition:.3s;cursor:pointer}.reviews__dot.is-active{width:22px;background:#ff641c}.reviews__link{position:absolute;bottom:16px;left:50%;transform:translateX(-50%);color:rgba(255,255,255,.55);font-size:13px;text-decoration:none;white-space:nowrap}.reviews__link:hover{color:#fff}.reviews__status{position:absolute;inset:145px 60px auto;text-align:center;color:rgba(255,255,255,.58);font-size:15px}.reviews__status:empty{display:none}@media(max-width:700px){.reviews{height:390px;padding:20px 42px 43px}.reviews__viewport{height:285px}.review-card{flex-basis:calc(100vw - 100px);min-height:235px;padding:20px;border-radius:21px}.review-card__text{-webkit-line-clamp:6;font-size:15px}.reviews__arrow{top:142px;width:38px;height:52px;font-size:50px;line-height:43px}.reviews__arrow--prev{left:2px}.reviews__arrow--next{right:2px}.reviews__link{bottom:12px}}
+*{box-sizing:border-box}
+html,body{margin:0;background:transparent!important;color:#fff;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif}
+body{overflow-x:hidden}
+
+/* Прозрачна только общая секция. Сами карточки остаются тёмными. */
+.reviews{
+  position:relative;
+  width:100%;
+  max-width:1150px;
+  height:380px;
+  margin:0 auto;
+  padding:12px 54px 48px;
+  overflow:hidden;
+  background:transparent!important;
+}
+
+/* Растушёвка обрезанных боковых карточек без чёрной подложки. */
+.reviews__viewport{
+  position:relative;
+  height:274px;
+  overflow:hidden;
+  background:transparent!important;
+  -webkit-mask-image:linear-gradient(to right,transparent 0,#000 8%,#000 92%,transparent 100%);
+  mask-image:linear-gradient(to right,transparent 0,#000 8%,#000 92%,transparent 100%);
+  -webkit-mask-repeat:no-repeat;
+  mask-repeat:no-repeat;
+  -webkit-mask-size:100% 100%;
+  mask-size:100% 100%;
+}
+
+.reviews__track{
+  display:flex;
+  align-items:center;
+  gap:22px;
+  height:100%;
+  will-change:transform;
+  transition:transform .72s cubic-bezier(.22,1,.36,1);
+}
+
+.review-card{
+  flex:0 0 min(510px,70vw);
+  min-height:226px;
+  padding:24px 26px;
+  border:1px solid rgba(255,101,26,.35);
+  border-radius:24px;
+  background:linear-gradient(145deg,#202020 0%,#171717 62%,#121212 100%);
+  box-shadow:0 18px 46px rgba(0,0,0,.36);
+  opacity:.42;
+  transform:scale(.88);
+  filter:brightness(.72);
+  transition:opacity .55s,transform .55s,border-color .55s,box-shadow .55s,filter .55s;
+  cursor:pointer;
+}
+.review-card.is-near{
+  opacity:.72;
+  transform:scale(.94);
+  filter:brightness(.84);
+}
+.review-card.is-active{
+  opacity:1;
+  transform:scale(1);
+  filter:none;
+  border-color:rgba(255,101,26,.72);
+  box-shadow:0 22px 58px rgba(0,0,0,.48);
+}
+
+.review-card__top{display:flex;align-items:center;gap:15px}
+.review-card__avatar{
+  width:54px;height:54px;border-radius:50%;object-fit:cover;
+  background:linear-gradient(145deg,#303030,#202020)
+}
+.review-card__avatar--placeholder{display:grid;place-items:center;font-weight:700;font-size:21px;color:#ff641c}
+.review-card__name{margin:0 0 5px;font-size:19px;line-height:1.2}
+.review-card__stars{color:#ff641c;letter-spacing:1px;font-size:17px;line-height:1}
+.review-card__text{
+  display:-webkit-box;
+  -webkit-box-orient:vertical;
+  -webkit-line-clamp:4;
+  overflow:hidden;
+  margin:18px 0 14px;
+  font-size:16px;
+  line-height:1.5;
+  color:rgba(255,255,255,.92)
+}
+.review-card__date{font-size:13px;color:rgba(255,255,255,.48)}
+
+/* Только стрелка — без круга, рамки и подложки. */
+.reviews__arrow{
+  position:absolute;
+  z-index:5;
+  top:112px;
+  width:42px;
+  height:62px;
+  padding:0;
+  border:0!important;
+  border-radius:0!important;
+  background:transparent!important;
+  box-shadow:none!important;
+  color:#ff641c;
+  font-size:58px;
+  font-weight:200;
+  line-height:52px;
+  cursor:pointer;
+  text-shadow:0 2px 14px rgba(0,0,0,.35);
+  transition:transform .2s,opacity .2s;
+  -webkit-tap-highlight-color:transparent;
+}
+.reviews__arrow:hover{transform:scale(1.1);opacity:.88}
+.reviews__arrow:focus-visible{outline:0;text-shadow:0 0 10px rgba(255,100,28,.8)}
+.reviews__arrow--prev{left:4px}
+.reviews__arrow--next{right:4px}
+
+.reviews__dots{
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  gap:7px;
+  min-height:12px;
+  margin-top:9px;
+  padding:0 12px;
+  overflow:hidden;
+}
+.reviews__dot{
+  flex:0 0 auto;
+  width:5px;height:5px;padding:0;border:0;border-radius:99px;
+  background:rgba(255,255,255,.26);
+  transition:.3s;
+  cursor:pointer
+}
+.reviews__dot.is-active{width:22px;background:#ff641c}
+
+.reviews__link{
+  position:absolute;
+  bottom:12px;
+  left:50%;
+  transform:translateX(-50%);
+  color:rgba(255,255,255,.5);
+  font-size:13px;
+  text-decoration:none;
+  white-space:nowrap
+}
+.reviews__link:hover{color:#fff}
+.reviews__status{
+  position:absolute;
+  inset:124px 60px auto;
+  text-align:center;
+  color:rgba(255,255,255,.48);
+  font-size:15px
+}
+.reviews__status:empty{display:none}
+
+@media(max-width:700px){
+  .reviews{height:350px;padding:8px 34px 42px}
+  .reviews__viewport{
+    height:260px;
+    -webkit-mask-image:linear-gradient(to right,transparent 0,#000 4%,#000 96%,transparent 100%);
+    mask-image:linear-gradient(to right,transparent 0,#000 4%,#000 96%,transparent 100%)
+  }
+  .reviews__track{gap:14px}
+  .review-card{
+    flex-basis:calc(100vw - 82px);
+    min-height:218px;
+    padding:19px;
+    border-radius:21px
+  }
+  .review-card__avatar{width:48px;height:48px}
+  .review-card__name{font-size:17px}
+  .review-card__stars{font-size:16px}
+  .review-card__text{-webkit-line-clamp:5;font-size:15px;margin-top:15px}
+  .reviews__arrow{top:104px;width:30px;height:52px;font-size:50px;line-height:44px}
+  .reviews__arrow--prev{left:-1px}.reviews__arrow--next{right:-1px}
+  .reviews__dots{gap:6px;margin-top:7px}
+  .reviews__dot{width:4px;height:4px}
+  .reviews__dot.is-active{width:18px}
+  .reviews__link{bottom:9px;font-size:12px}
+}
