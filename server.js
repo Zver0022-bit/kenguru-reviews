@@ -8,7 +8,13 @@ const app = express();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const PUBLIC_DIR = path.join(__dirname, 'public');
-const CACHE_FILE = path.join(__dirname, 'data', 'reviews-cache-v5.json');
+const CACHE_FILE = path.join(__dirname, 'data', 'reviews-cache-v6.json');
+const CACHE_CANDIDATES = [
+  CACHE_FILE,
+  path.join(__dirname, 'data', 'reviews-cache-v5.json'),
+  path.join(__dirname, 'data', 'reviews-cache.json'),
+  path.join(__dirname, 'data', 'reviews-cache-v4.json')
+];
 const PORT = Number(process.env.PORT || 3000);
 const ORG_ID = String(process.env.YANDEX_ORG_ID || '158191390944');
 const REVIEWS_URL = process.env.YANDEX_REVIEWS_URL ||
@@ -116,10 +122,16 @@ function tryParseJson(text) {
 }
 
 async function loadDiskCache() {
-  try {
-    const parsed = JSON.parse(await fs.readFile(CACHE_FILE, 'utf8'));
-    if (Array.isArray(parsed.reviews)) cache = parsed;
-  } catch {}
+  let best = null;
+  for (const file of CACHE_CANDIDATES) {
+    try {
+      const parsed = JSON.parse(await fs.readFile(file, 'utf8'));
+      if (Array.isArray(parsed.reviews) && parsed.reviews.length) {
+        if (!best || Number(parsed.updatedAt || 0) > Number(best.updatedAt || 0)) best = parsed;
+      }
+    } catch {}
+  }
+  if (best) cache = { updatedAt: Number(best.updatedAt || 0), reviews: deduplicate(best.reviews) };
 }
 
 async function saveDiskCache() {
@@ -325,14 +337,11 @@ async function scrapeYandex() {
     await browser.close();
   }
 }
-async function refreshReviews(force = false) {
-  const isFresh = cache.reviews.length && Date.now() - cache.updatedAt < CACHE_TTL;
-  if (!force && isFresh) return { ...cache, stale: false };
+async function runRefresh() {
   if (activeRefresh) return activeRefresh;
-
   activeRefresh = scrapeYandex()
     .then(async reviews => {
-      cache = { updatedAt: Date.now(), reviews };
+      cache = { updatedAt: Date.now(), reviews: deduplicate(reviews) };
       await saveDiskCache().catch(() => {});
       return { ...cache, stale: false };
     })
@@ -341,8 +350,16 @@ async function refreshReviews(force = false) {
       throw error;
     })
     .finally(() => { activeRefresh = null; });
-
   return activeRefresh;
+}
+
+function getReviewsFast(force = false) {
+  const isFresh = cache.reviews.length && Date.now() - cache.updatedAt < CACHE_TTL;
+  if (cache.reviews.length) {
+    if (force || !isFresh) runRefresh().catch(error => console.error('Фоновое обновление:', error.message));
+    return { ...cache, stale: !isFresh, refreshing: Boolean(activeRefresh) };
+  }
+  return null;
 }
 
 await loadDiskCache();
@@ -364,9 +381,13 @@ app.get('/api/health', (req, res) => res.json({
 app.get('/api/debug', (req, res) => res.json({ ok: true, diagnostics }));
 app.get('/api/reviews', async (req, res) => {
   try {
-    const data = await refreshReviews(req.query.refresh === '1');
-    res.set('Cache-Control', 'public, max-age=300, stale-while-revalidate=3600');
-    res.json({ ok: true, source: REVIEWS_URL, ...data });
+    const force = req.query.refresh === '1';
+    const wait = req.query.wait === '1';
+    const fast = getReviewsFast(force);
+    res.set('Cache-Control', 'public, max-age=300, stale-while-revalidate=86400');
+    if (fast && !wait) return res.json({ ok: true, source: REVIEWS_URL, ...fast });
+    const data = await runRefresh();
+    res.json({ ok: true, source: REVIEWS_URL, ...data, refreshing: false });
   } catch (error) {
     res.status(502).json({ ok: false, message: error.message, reviews: [], updatedAt: null, debug: '/api/debug' });
   }
@@ -374,6 +395,7 @@ app.get('/api/reviews', async (req, res) => {
 app.get('*', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'index.html')));
 
 app.listen(PORT, () => {
-  console.log(`Kenguru reviews strict v5 running on port ${PORT}`);
-  refreshReviews(false).catch(error => console.error('Первичное обновление:', error.message));
+  console.log(`Kenguru reviews transparent cache v6 running on port ${PORT}`);
+  if (cache.reviews.length) runRefresh().catch(error => console.error('Первичное фоновое обновление:', error.message));
+  else runRefresh().catch(error => console.error('Первичное обновление:', error.message));
 });
