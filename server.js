@@ -102,57 +102,196 @@ async function saveDiskCache() {
 }
 
 async function scrapeYandex() {
-  diagnostics = { lastRun: new Date().toISOString(), title: '', candidateUrls: [], parsedResponses: 0, errors: [] };
-  const browser = await chromium.launch({ headless: true, args: ['--disable-blink-features=AutomationControlled','--no-sandbox','--disable-dev-shm-usage'] });
-  const context = await browser.newContext({ locale:'ru-RU', timezoneId:'Europe/Moscow', viewport:{width:1440,height:1100}, userAgent:'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36', extraHTTPHeaders:{'Accept-Language':'ru-RU,ru;q=0.9,en;q=0.7'} });
-  await context.addInitScript(() => Object.defineProperty(navigator, 'webdriver', { get: () => undefined }));
-  const page = await context.newPage();
-  const intercepted = []; const tasks = [];
+  diagnostics = {
+    lastRun: new Date().toISOString(),
+    title: '',
+    candidateUrls: [],
+    parsedResponses: 0,
+    cdpBodies: 0,
+    domReviews: 0,
+    errors: []
+  };
 
-  page.on('response', response => {
-    const task = (async () => {
-      const url = response.url(); const type = response.request().resourceType();
-      const interesting = /review|business|organization|card|discovery|ajax/i.test(url);
-      if (interesting && diagnostics.candidateUrls.length < 100) diagnostics.candidateUrls.push(`${response.status()} ${type} ${url}`);
-      if (!['xhr','fetch','document','script'].includes(type) || response.status() < 200 || response.status() >= 400) return;
-      try {
-        const body = await response.text();
-        if (!body || body.length > 15000000) return;
-        const json = tryParseJson(body); if (!json) return;
-        diagnostics.parsedResponses += 1;
-        intercepted.push(...extractReviewsFromJson(json));
-      } catch (e) { if (interesting && diagnostics.errors.length < 20) diagnostics.errors.push(`${url}: ${e.message}`); }
-    })(); tasks.push(task);
+  const browser = await chromium.launch({
+    headless: true,
+    args: [
+      '--disable-blink-features=AutomationControlled',
+      '--no-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-gpu'
+    ]
+  });
+
+  const context = await browser.newContext({
+    locale: 'ru-RU',
+    timezoneId: 'Europe/Moscow',
+    viewport: { width: 1440, height: 1100 },
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36',
+    extraHTTPHeaders: { 'Accept-Language': 'ru-RU,ru;q=0.9,en;q=0.7' }
+  });
+
+  await context.addInitScript(() => {
+    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+  });
+
+  const page = await context.newPage();
+  const cdp = await context.newCDPSession(page);
+  await cdp.send('Network.enable', { maxTotalBufferSize: 100000000, maxResourceBufferSize: 20000000 });
+
+  const intercepted = [];
+  const bodyTasks = new Set();
+
+  const inspectBody = async (requestId, url, mimeType = '') => {
+    try {
+      const result = await cdp.send('Network.getResponseBody', { requestId });
+      const text = result.base64Encoded
+        ? Buffer.from(result.body, 'base64').toString('utf8')
+        : result.body;
+      if (!text || text.length > 20_000_000) return;
+      const json = tryParseJson(text);
+      if (!json) return;
+      diagnostics.parsedResponses += 1;
+      diagnostics.cdpBodies += 1;
+      intercepted.push(...extractReviewsFromJson(json));
+    } catch (error) {
+      if (/review|business|organization|search|maps/i.test(url) && diagnostics.errors.length < 30) {
+        diagnostics.errors.push(`CDP ${url}: ${error.message}`);
+      }
+    }
+  };
+
+  cdp.on('Network.responseReceived', event => {
+    const { response, requestId, type } = event;
+    const url = response.url || '';
+    const interesting = /review|business|organization|card|discovery|ajax|search|maps/i.test(url);
+    if (interesting && diagnostics.candidateUrls.length < 150) {
+      diagnostics.candidateUrls.push(`${Math.round(response.status)} ${type} ${url}`);
+    }
+    if (response.status < 200 || response.status >= 400) return;
+    if (!['XHR', 'Fetch', 'Document', 'Script'].includes(type)) return;
+    if (!/json|javascript|text|octet-stream/i.test(response.mimeType || '')) return;
+
+    const task = new Promise(resolve => setTimeout(resolve, 80))
+      .then(() => inspectBody(requestId, url, response.mimeType))
+      .finally(() => bodyTasks.delete(task));
+    bodyTasks.add(task);
   });
 
   try {
-    await page.goto(REVIEWS_URL, { waitUntil:'domcontentloaded', timeout:90000 });
-    await page.waitForTimeout(6000); diagnostics.title = await page.title().catch(()=> '');
-    for (const selector of ['button[aria-label="Закрыть"]','button:has-text("Принять")','button:has-text("Понятно")']) await page.locator(selector).first().click({timeout:700}).catch(()=>{});
-    for (const selector of ['a[href*="/reviews"]','[role="tab"]:has-text("Отзывы")','button:has-text("Отзывы")','[data-id="reviews"]']) {
-      const loc=page.locator(selector).first(); if (await loc.count()) { await loc.click({timeout:1500}).catch(()=>{}); await page.waitForTimeout(2500); break; }
-    }
-    let stable=0, previous=0;
-    for (let round=0; round<70 && deduplicate(intercepted).length<MAX_REVIEWS; round++) {
-      await page.evaluate(() => {
-        const els=[...document.querySelectorAll('div,main,section,ul')].filter(el=>el.scrollHeight>el.clientHeight+120).sort((a,b)=>(b.scrollHeight-b.clientHeight)-(a.scrollHeight-a.clientHeight));
-        const panel=els.find(el=>/review|отзыв|scroll|card/i.test(`${el.className} ${el.getAttribute('aria-label')||''}`))||els[0];
-        if(panel){panel.scrollTop=panel.scrollHeight;panel.dispatchEvent(new Event('scroll',{bubbles:true}));}
-        window.scrollTo(0,document.body.scrollHeight);
-      });
-      for (const selector of ['button:has-text("Показать ещё")','button:has-text("Загрузить ещё")','[role="button"]:has-text("Показать ещё")']) await page.locator(selector).last().click({timeout:350}).catch(()=>{});
-      await page.waitForTimeout(900);
-      const total=deduplicate(intercepted).length; stable=total===previous?stable+1:0; previous=total; if(stable>=12) break;
-    }
-    await Promise.allSettled(tasks);
-    const scripts = await page.evaluate(() => [...document.scripts].map(s=>s.textContent||'').filter(t=>t.length>20&&/review|отзыв|business/i.test(t)).slice(0,40));
-    for (const text of scripts) { const json=tryParseJson(text); if(json) intercepted.push(...extractReviewsFromJson(json)); }
-    const reviews=deduplicate(intercepted);
-    if(!reviews.length) throw new Error(`Яндекс открыл страницу, но не передал отзывы. Заголовок: ${diagnostics.title || 'не определён'}. Диагностика: /api/debug`);
-    return reviews;
-  } finally { await context.close(); await browser.close(); }
-}
+    await page.goto(REVIEWS_URL, { waitUntil: 'domcontentloaded', timeout: 90_000 });
+    await page.waitForTimeout(7_000);
+    diagnostics.title = await page.title().catch(() => '');
 
+    for (const selector of [
+      'button[aria-label="Закрыть"]',
+      'button:has-text("Принять")',
+      'button:has-text("Понятно")'
+    ]) {
+      await page.locator(selector).first().click({ timeout: 700 }).catch(() => {});
+    }
+
+    for (const selector of [
+      'a[href*="/reviews"]',
+      '[role="tab"]:has-text("Отзывы")',
+      'button:has-text("Отзывы")',
+      '[data-id="reviews"]'
+    ]) {
+      const loc = page.locator(selector).first();
+      if (await loc.count()) {
+        await loc.click({ timeout: 1800 }).catch(() => {});
+        await page.waitForTimeout(2500);
+        break;
+      }
+    }
+
+    let stable = 0;
+    let previous = 0;
+    for (let round = 0; round < 80 && deduplicate(intercepted).length < MAX_REVIEWS; round++) {
+      await page.evaluate(() => {
+        const candidates = [...document.querySelectorAll('div, main, section, ul')]
+          .filter(el => el.scrollHeight > el.clientHeight + 120)
+          .sort((a, b) => (b.scrollHeight - b.clientHeight) - (a.scrollHeight - a.clientHeight));
+        const panel = candidates.find(el => /review|отзыв|scroll|card|business/i.test(
+          `${el.className} ${el.getAttribute('aria-label') || ''}`
+        )) || candidates[0];
+        if (panel) {
+          panel.scrollTop = panel.scrollHeight;
+          panel.dispatchEvent(new Event('scroll', { bubbles: true }));
+        }
+        window.scrollTo(0, document.body.scrollHeight);
+      });
+
+      for (const selector of [
+        'button:has-text("Показать ещё")',
+        'button:has-text("Загрузить ещё")',
+        '[role="button"]:has-text("Показать ещё")'
+      ]) {
+        await page.locator(selector).last().click({ timeout: 350 }).catch(() => {});
+      }
+
+      await page.waitForTimeout(900);
+      const total = deduplicate(intercepted).length;
+      stable = total === previous ? stable + 1 : 0;
+      previous = total;
+      if (stable >= 14) break;
+    }
+
+    await Promise.allSettled([...bodyTasks]);
+
+    const domReviews = await page.evaluate(() => {
+      const cleanText = value => String(value || '').replace(/\s+/g, ' ').trim();
+      const cards = [...document.querySelectorAll(
+        '.business-review-view, [class*="business-review-view"], [data-review-id], [itemprop="review"]'
+      )];
+      return cards.map((card, index) => {
+        const pick = selectors => {
+          for (const selector of selectors) {
+            const el = card.querySelector(selector);
+            const value = cleanText(el?.textContent);
+            if (value) return value;
+          }
+          return '';
+        };
+        const name = pick([
+          '.business-review-view__author-name',
+          '[class*="review-view__author"]',
+          '[itemprop="author"]',
+          '[class*="author"]'
+        ]);
+        const text = pick([
+          '.business-review-view__body-text',
+          '.business-review-view__body',
+          '[itemprop="reviewBody"]',
+          '[class*="review-view__body"]'
+        ]);
+        const date = pick([
+          '.business-review-view__date',
+          '[itemprop="datePublished"]',
+          '[class*="review-view__date"]'
+        ]);
+        const aria = cleanText(card.querySelector('[aria-label*="оцен"]')?.getAttribute('aria-label'));
+        const width = card.querySelector('[class*="stars"] [style*="width"]')?.style?.width || '';
+        let rating = Number((aria.match(/[1-5]/) || [])[0] || 0);
+        if (!rating && width) rating = Math.max(1, Math.min(5, Math.round(parseFloat(width) / 20)));
+        return { id: card.getAttribute('data-review-id') || `dom-${index}`, name, text, date, rating: rating || 5 };
+      }).filter(item => item.name && item.text);
+    }).catch(() => []);
+
+    diagnostics.domReviews = domReviews.length;
+    intercepted.push(...domReviews);
+
+    const reviews = deduplicate(intercepted);
+    if (!reviews.length) {
+      throw new Error(
+        `Яндекс открыл страницу, но не передал отзывы. Заголовок: ${diagnostics.title || 'не определён'}. Диагностика: /api/debug`
+      );
+    }
+    return reviews;
+  } finally {
+    await context.close();
+    await browser.close();
+  }
+}
 async function refreshReviews(force = false) {
   const isFresh = cache.reviews.length && Date.now() - cache.updatedAt < CACHE_TTL;
   if (!force && isFresh) return { ...cache, stale: false };
@@ -175,6 +314,14 @@ async function refreshReviews(force = false) {
 
 await loadDiskCache();
 
+app.use((req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
+  next();
+});
+
 app.use(express.static(PUBLIC_DIR, { maxAge: '1h' }));
 app.get('/api/health', (req, res) => res.json({
   ok: true,
@@ -194,6 +341,6 @@ app.get('/api/reviews', async (req, res) => {
 app.get('*', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'index.html')));
 
 app.listen(PORT, () => {
-  console.log(`Kenguru reviews network v3 running on port ${PORT}`);
+  console.log(`Kenguru reviews CDP v4 running on port ${PORT}`);
   refreshReviews(false).catch(error => console.error('Первичное обновление:', error.message));
 });
