@@ -18,6 +18,7 @@ const MAX_REVIEWS = Math.max(1, Math.min(500, Number(process.env.MAX_REVIEWS || 
 
 let cache = { updatedAt: 0, reviews: [] };
 let activeRefresh = null;
+let diagnostics = { lastRun: null, title: '', candidateUrls: [], parsedResponses: 0, errors: [] };
 
 const clean = (value = '') => String(value).replace(/\s+/g, ' ').trim();
 
@@ -35,52 +36,57 @@ function normalizeDate(value) {
   return text;
 }
 
-function findReviewArrays(value, found = []) {
-  if (!value || typeof value !== 'object') return found;
-  if (Array.isArray(value)) {
-    if (value.length && value.some(item => item && typeof item === 'object' &&
-      ('text' in item || 'comment' in item || 'reviewText' in item) &&
-      ('rating' in item || 'stars' in item || 'author' in item))) {
-      found.push(value);
-    }
-    for (const item of value) findReviewArrays(item, found);
-  } else {
-    for (const child of Object.values(value)) findReviewArrays(child, found);
-  }
+function asObject(value) { return value && typeof value === 'object' ? value : {}; }
+
+function looksLikeReview(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return false;
+  const text = clean(raw.text || raw.comment || raw.reviewText || raw.body || raw.description || raw.content || '');
+  const author = raw.author || raw.user || raw.reviewer || raw.authorName || raw.userName || raw.name;
+  const rating = raw.rating ?? raw.stars ?? raw.score ?? raw.grade ?? raw.ratingValue;
+  return text.length >= 3 && Boolean(author || rating);
+}
+
+function collectReviewObjects(value, found = [], seen = new WeakSet()) {
+  if (!value || typeof value !== 'object' || seen.has(value)) return found;
+  seen.add(value);
+  if (looksLikeReview(value)) found.push(value);
+  if (Array.isArray(value)) for (const item of value) collectReviewObjects(item, found, seen);
+  else for (const child of Object.values(value)) collectReviewObjects(child, found, seen);
   return found;
 }
 
 function normalizeReview(raw, index = 0) {
-  const author = raw.author || raw.user || raw.reviewer || {};
-  const name = clean(
-    raw.authorName || raw.userName || raw.name || author.name || author.displayName || author.publicName || 'Гость'
-  );
-  const text = clean(raw.text || raw.comment || raw.reviewText || raw.body || raw.description || '');
-  const dateRaw = raw.updateTime || raw.updatedAt || raw.createTime || raw.createdAt || raw.date || raw.time || raw.datetime;
-  const avatar = clean(
-    raw.authorAvatar || raw.avatar || raw.avatarUrl || author.avatar || author.avatarUrl || author.photo || ''
-  );
-  const rating = Math.max(1, Math.min(5, Math.round(Number(raw.rating || raw.stars || raw.score || 5))));
-  const id = clean(raw.reviewId || raw.id || raw.uuid || `${name}-${dateRaw || index}-${text.slice(0, 30)}`);
+  const author = asObject(raw.author || raw.user || raw.reviewer || raw.account || raw.profile);
+  const name = clean(raw.authorName || raw.userName || raw.name || raw.displayName || author.name || author.displayName || author.publicName || author.fullName || 'Гость');
+  const text = clean(raw.text || raw.comment || raw.reviewText || raw.body || raw.description || raw.content || raw.pros || '');
+  const dateRaw = raw.updateTime || raw.updatedAt || raw.createTime || raw.createdAt || raw.date || raw.time || raw.datetime || raw.publishedAt || raw.publicationTime;
+  const avatarObj = asObject(author.avatar || author.photo);
+  const avatar = clean(raw.authorAvatar || raw.avatarUrl || raw.avatar || author.avatarUrl || author.photoUrl || avatarObj.url || avatarObj.href || '');
+  const rating = Math.max(1, Math.min(5, Math.round(Number(raw.rating ?? raw.stars ?? raw.score ?? raw.grade ?? raw.ratingValue ?? 5) || 5)));
+  const id = clean(raw.reviewId || raw.id || raw.uuid || raw.permalink || `${name}-${dateRaw || index}-${text.slice(0, 50)}`);
   return { id, name, text, date: normalizeDate(dateRaw), avatar, rating };
 }
 
-function extractReviewsFromJson(json) {
-  const candidates = findReviewArrays(json);
-  const flattened = candidates.flatMap(array => array.map(normalizeReview));
-  return deduplicate(flattened.filter(review => review.text && review.name));
-}
+function extractReviewsFromJson(json) { return deduplicate(collectReviewObjects(json).map(normalizeReview)); }
 
 function deduplicate(items) {
-  const seen = new Set();
-  const result = [];
+  const seen = new Set(); const result = [];
   for (const item of items) {
-    const key = item.id || `${item.name}|${item.text}`;
+    if (!item?.text || !item?.name) continue;
+    const key = item.id || `${item.name}|${item.date}|${item.text}`;
     if (seen.has(key)) continue;
-    seen.add(key);
-    result.push(item);
+    seen.add(key); result.push(item);
   }
   return result.slice(0, MAX_REVIEWS);
+}
+
+function tryParseJson(text) {
+  const trimmed = String(text || '').trim(); if (!trimmed) return null;
+  const candidates = [trimmed];
+  const positions = [trimmed.indexOf('{'), trimmed.indexOf('[')].filter(n => n >= 0).sort((a,b)=>a-b);
+  if (positions[0] > 0) candidates.push(trimmed.slice(positions[0]));
+  for (const candidate of candidates) { try { return JSON.parse(candidate); } catch {} }
+  return null;
 }
 
 async function loadDiskCache() {
@@ -96,116 +102,55 @@ async function saveDiskCache() {
 }
 
 async function scrapeYandex() {
-  const browser = await chromium.launch({
-    headless: true,
-    args: ['--disable-blink-features=AutomationControlled', '--no-sandbox', '--disable-dev-shm-usage']
-  });
-  const context = await browser.newContext({
-    locale: 'ru-RU',
-    timezoneId: 'Europe/Moscow',
-    viewport: { width: 1440, height: 1100 },
-    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-    extraHTTPHeaders: {
-      'Accept-Language': 'ru-RU,ru;q=0.9,en;q=0.7',
-      'DNT': '1'
-    }
-  });
+  diagnostics = { lastRun: new Date().toISOString(), title: '', candidateUrls: [], parsedResponses: 0, errors: [] };
+  const browser = await chromium.launch({ headless: true, args: ['--disable-blink-features=AutomationControlled','--no-sandbox','--disable-dev-shm-usage'] });
+  const context = await browser.newContext({ locale:'ru-RU', timezoneId:'Europe/Moscow', viewport:{width:1440,height:1100}, userAgent:'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36', extraHTTPHeaders:{'Accept-Language':'ru-RU,ru;q=0.9,en;q=0.7'} });
+  await context.addInitScript(() => Object.defineProperty(navigator, 'webdriver', { get: () => undefined }));
   const page = await context.newPage();
-  const intercepted = [];
+  const intercepted = []; const tasks = [];
 
-  page.on('response', async response => {
-    const url = response.url();
-    if (!/fetchReviews|reviews/i.test(url) || !/maps\/api|api\/business/i.test(url)) return;
-    try {
-      const contentType = response.headers()['content-type'] || '';
-      if (!contentType.includes('json')) return;
-      const json = await response.json();
-      intercepted.push(...extractReviewsFromJson(json));
-    } catch {}
+  page.on('response', response => {
+    const task = (async () => {
+      const url = response.url(); const type = response.request().resourceType();
+      const interesting = /review|business|organization|card|discovery|ajax/i.test(url);
+      if (interesting && diagnostics.candidateUrls.length < 100) diagnostics.candidateUrls.push(`${response.status()} ${type} ${url}`);
+      if (!['xhr','fetch','document','script'].includes(type) || response.status() < 200 || response.status() >= 400) return;
+      try {
+        const body = await response.text();
+        if (!body || body.length > 15000000) return;
+        const json = tryParseJson(body); if (!json) return;
+        diagnostics.parsedResponses += 1;
+        intercepted.push(...extractReviewsFromJson(json));
+      } catch (e) { if (interesting && diagnostics.errors.length < 20) diagnostics.errors.push(`${url}: ${e.message}`); }
+    })(); tasks.push(task);
   });
 
   try {
-    await page.goto(REVIEWS_URL, { waitUntil: 'domcontentloaded', timeout: 90_000 });
-    await page.waitForTimeout(4_000);
-
-    for (const selector of [
-      'button[aria-label="Закрыть"]',
-      'button:has-text("Принять")',
-      'button:has-text("Понятно")'
-    ]) {
-      await page.locator(selector).first().click({ timeout: 500 }).catch(() => {});
+    await page.goto(REVIEWS_URL, { waitUntil:'domcontentloaded', timeout:90000 });
+    await page.waitForTimeout(6000); diagnostics.title = await page.title().catch(()=> '');
+    for (const selector of ['button[aria-label="Закрыть"]','button:has-text("Принять")','button:has-text("Понятно")']) await page.locator(selector).first().click({timeout:700}).catch(()=>{});
+    for (const selector of ['a[href*="/reviews"]','[role="tab"]:has-text("Отзывы")','button:has-text("Отзывы")','[data-id="reviews"]']) {
+      const loc=page.locator(selector).first(); if (await loc.count()) { await loc.click({timeout:1500}).catch(()=>{}); await page.waitForTimeout(2500); break; }
     }
-
-    let stable = 0;
-    let previousTotal = 0;
-    for (let round = 0; round < 80 && intercepted.length < MAX_REVIEWS; round += 1) {
+    let stable=0, previous=0;
+    for (let round=0; round<70 && deduplicate(intercepted).length<MAX_REVIEWS; round++) {
       await page.evaluate(() => {
-        const cards = [...document.querySelectorAll('.business-review-view,[class*="business-review-view"],[data-testid*="review"]')];
-        const last = cards.at(-1);
-        if (last) last.scrollIntoView({ block: 'end', behavior: 'instant' });
-
-        const scrollables = [...document.querySelectorAll('div,main,section')]
-          .filter(el => el.scrollHeight > el.clientHeight + 150)
-          .sort((a, b) => (b.scrollHeight - b.clientHeight) - (a.scrollHeight - a.clientHeight));
-        const panel = scrollables.find(el => /review|scroll|отзыв/i.test(`${el.className} ${el.getAttribute('aria-label') || ''}`)) || scrollables[0];
-        if (panel) {
-          panel.scrollTop = panel.scrollHeight;
-          panel.dispatchEvent(new Event('scroll', { bubbles: true }));
-        }
-        window.scrollTo(0, document.body.scrollHeight);
+        const els=[...document.querySelectorAll('div,main,section,ul')].filter(el=>el.scrollHeight>el.clientHeight+120).sort((a,b)=>(b.scrollHeight-b.clientHeight)-(a.scrollHeight-a.clientHeight));
+        const panel=els.find(el=>/review|отзыв|scroll|card/i.test(`${el.className} ${el.getAttribute('aria-label')||''}`))||els[0];
+        if(panel){panel.scrollTop=panel.scrollHeight;panel.dispatchEvent(new Event('scroll',{bubbles:true}));}
+        window.scrollTo(0,document.body.scrollHeight);
       });
-
-      for (const selector of [
-        'button:has-text("Показать ещё")',
-        'button:has-text("Загрузить ещё")',
-        '[role="button"]:has-text("Показать ещё")'
-      ]) {
-        await page.locator(selector).last().click({ timeout: 400 }).catch(() => {});
-      }
-
+      for (const selector of ['button:has-text("Показать ещё")','button:has-text("Загрузить ещё")','[role="button"]:has-text("Показать ещё")']) await page.locator(selector).last().click({timeout:350}).catch(()=>{});
       await page.waitForTimeout(900);
-      const total = deduplicate(intercepted).length;
-      stable = total === previousTotal ? stable + 1 : 0;
-      previousTotal = total;
-      if (stable >= 10) break;
+      const total=deduplicate(intercepted).length; stable=total===previous?stable+1:0; previous=total; if(stable>=12) break;
     }
-
-    const domReviews = await page.evaluate(() => {
-      const clean = value => String(value || '').replace(/\s+/g, ' ').trim();
-      const cards = [...document.querySelectorAll('.business-review-view,[class*="business-review-view"],[data-testid*="review"]')];
-      return cards.map((card, index) => {
-        const pick = selectors => {
-          for (const selector of selectors) {
-            const value = clean(card.querySelector(selector)?.textContent);
-            if (value) return value;
-          }
-          return '';
-        };
-        const name = pick(['.business-review-view__author-name','[class*="author-name"]','[class*="author"]']);
-        const text = pick(['.business-review-view__body-text','[class*="body-text"]','[class*="review-text"]']);
-        const date = pick(['.business-review-view__date','[class*="review-date"]','time']);
-        const aria = card.querySelector('[aria-label*="из 5"],[aria-label*="зв"]')?.getAttribute('aria-label') || '';
-        const rating = Number((aria.match(/[1-5](?:[.,]\d)?/) || ['5'])[0].replace(',', '.'));
-        const image = card.querySelector('img');
-        return {
-          id: card.getAttribute('data-review-id') || `${name}-${date}-${index}`,
-          name, text, date,
-          avatar: image?.currentSrc || image?.src || '',
-          rating: Math.round(rating || 5)
-        };
-      }).filter(item => item.name && item.text);
-    });
-
-    const reviews = deduplicate([...intercepted, ...domReviews.map(normalizeReview)]);
-    if (!reviews.length) {
-      const title = await page.title().catch(() => '');
-      throw new Error(`Яндекс не отдал отзывы. Заголовок страницы: ${title || 'не определён'}`);
-    }
+    await Promise.allSettled(tasks);
+    const scripts = await page.evaluate(() => [...document.scripts].map(s=>s.textContent||'').filter(t=>t.length>20&&/review|отзыв|business/i.test(t)).slice(0,40));
+    for (const text of scripts) { const json=tryParseJson(text); if(json) intercepted.push(...extractReviewsFromJson(json)); }
+    const reviews=deduplicate(intercepted);
+    if(!reviews.length) throw new Error(`Яндекс открыл страницу, но не передал отзывы. Заголовок: ${diagnostics.title || 'не определён'}. Диагностика: /api/debug`);
     return reviews;
-  } finally {
-    await context.close();
-    await browser.close();
-  }
+  } finally { await context.close(); await browser.close(); }
 }
 
 async function refreshReviews(force = false) {
@@ -236,18 +181,19 @@ app.get('/api/health', (req, res) => res.json({
   cachedReviews: cache.reviews.length,
   updatedAt: cache.updatedAt || null
 }));
+app.get('/api/debug', (req, res) => res.json({ ok: true, diagnostics }));
 app.get('/api/reviews', async (req, res) => {
   try {
     const data = await refreshReviews(req.query.refresh === '1');
     res.set('Cache-Control', 'public, max-age=300, stale-while-revalidate=3600');
     res.json({ ok: true, source: REVIEWS_URL, ...data });
   } catch (error) {
-    res.status(502).json({ ok: false, message: error.message, reviews: [], updatedAt: null });
+    res.status(502).json({ ok: false, message: error.message, reviews: [], updatedAt: null, debug: '/api/debug' });
   }
 });
 app.get('*', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'index.html')));
 
 app.listen(PORT, () => {
-  console.log(`Kenguru reviews running on port ${PORT}`);
+  console.log(`Kenguru reviews network v3 running on port ${PORT}`);
   refreshReviews(false).catch(error => console.error('Первичное обновление:', error.message));
 });
