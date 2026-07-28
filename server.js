@@ -11,7 +11,7 @@ const PORT = process.env.PORT || 3000;
 const ORGANIZATION_URL = process.env.YANDEX_ORG_URL ||
   'https://yandex.ru/maps/org/kenguru/158191390944/?indoorLevel=1&ll=39.717231%2C47.284135&z=17';
 const CACHE_TTL = Number(process.env.CACHE_TTL || 30 * 60 * 1000);
-const REVIEW_LIMIT = Number(process.env.REVIEW_LIMIT || 20);
+const REVIEW_LIMIT = Math.max(1, Number(process.env.MAX_REVIEWS || 200));
 
 let cache = { updatedAt: 0, reviews: [] };
 let activeRequest = null;
@@ -45,17 +45,64 @@ async function scrapeReviews() {
       await page.locator(selector).first().click({ timeout: 800 }).catch(() => {});
     }
 
-    // Прокручиваем панель отзывов, чтобы подгрузились новые карточки.
-    for (let i = 0; i < 10; i += 1) {
-      await page.evaluate(() => {
-        const candidates = [...document.querySelectorAll('div')]
-          .filter(el => el.scrollHeight > el.clientHeight + 300)
-          .sort((a, b) => b.clientHeight - a.clientHeight);
-        const target = candidates.find(el => /отзыв|review/i.test(el.className || '')) || candidates[0];
-        if (target) target.scrollTop = target.scrollHeight;
-        window.scrollTo(0, document.body.scrollHeight);
+    // Подгружаем отзывы до тех пор, пока список действительно растёт.
+    // Яндекс использует виртуальную прокрутку, поэтому одного scrollTo недостаточно.
+    let previousCount = 0;
+    let stableRounds = 0;
+
+    for (let i = 0; i < 60; i += 1) {
+      // Нажимаем возможные кнопки «ещё / показать полностью / показать больше».
+      for (const selector of [
+        'button:has-text("Показать ещё")',
+        'button:has-text("Ещё")',
+        'button:has-text("Загрузить ещё")',
+        '[role="button"]:has-text("Показать ещё")'
+      ]) {
+        await page.locator(selector).last().click({ timeout: 350 }).catch(() => {});
+      }
+
+      const state = await page.evaluate(() => {
+        const cardSelectors = [
+          '.business-review-view',
+          '[class*="business-review-view"]',
+          '[class*="review-card"]',
+          '[data-testid*="review"]'
+        ];
+
+        let count = 0;
+        for (const selector of cardSelectors) {
+          const found = document.querySelectorAll(selector).length;
+          if (found > count) count = found;
+        }
+
+        const scrollables = [...document.querySelectorAll('div,main,section')]
+          .filter(el => el.scrollHeight > el.clientHeight + 120)
+          .sort((a, b) => (b.scrollHeight - b.clientHeight) - (a.scrollHeight - a.clientHeight));
+
+        const reviewPanel = scrollables.find(el => {
+          const cls = String(el.className || '');
+          const text = (el.getAttribute('aria-label') || '') + ' ' + cls;
+          return /review|отзыв|scroll/i.test(text);
+        }) || scrollables[0];
+
+        if (reviewPanel) {
+          const step = Math.max(reviewPanel.clientHeight * 0.85, 500);
+          reviewPanel.scrollTop = Math.min(reviewPanel.scrollTop + step, reviewPanel.scrollHeight);
+          reviewPanel.dispatchEvent(new Event('scroll', { bubbles: true }));
+        }
+
+        window.scrollBy(0, Math.max(window.innerHeight * 0.8, 650));
+        return { count, atEnd: reviewPanel ? reviewPanel.scrollTop + reviewPanel.clientHeight >= reviewPanel.scrollHeight - 20 : false };
       });
-      await page.waitForTimeout(550);
+
+      if (state.count >= REVIEW_LIMIT) break;
+
+      if (state.count === previousCount) stableRounds += 1;
+      else stableRounds = 0;
+
+      previousCount = state.count;
+      if (stableRounds >= 7 && state.atEnd) break;
+      await page.waitForTimeout(700);
     }
 
     const reviews = await page.evaluate((limit) => {
