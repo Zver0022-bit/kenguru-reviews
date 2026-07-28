@@ -1,13 +1,14 @@
-{
-  "name": "kenguru-yandex-reviews-network-v3",
-  "version": "3.0.0",
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "start": "node server.js"
-  },
-  "dependencies": {
-    "express": "^4.21.2",
-    "playwright": "1.51.1"
-  }
-}
+services:
+  - type: web
+    name: kenguru-reviews
+    runtime: docker
+    plan: free
+    autoDeploy: true
+    healthCheckPath: /api/health
+    envVars:
+      - key: YANDEX_ORG_ID
+        value: "158191390944"
+      - key: CACHE_TTL_MINUTES
+        value: "60"
+      - key: MAX_REVIEWS
+        value: "200"
