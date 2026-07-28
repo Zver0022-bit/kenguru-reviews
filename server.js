@@ -8,7 +8,7 @@ const app = express();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const PUBLIC_DIR = path.join(__dirname, 'public');
-const CACHE_FILE = path.join(__dirname, 'data', 'reviews-cache.json');
+const CACHE_FILE = path.join(__dirname, 'data', 'reviews-cache-v5.json');
 const PORT = Number(process.env.PORT || 3000);
 const ORG_ID = String(process.env.YANDEX_ORG_ID || '158191390944');
 const REVIEWS_URL = process.env.YANDEX_REVIEWS_URL ||
@@ -38,44 +38,70 @@ function normalizeDate(value) {
 
 function asObject(value) { return value && typeof value === 'object' ? value : {}; }
 
-function looksLikeReview(raw) {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return false;
-  const text = clean(raw.text || raw.comment || raw.reviewText || raw.body || raw.description || raw.content || '');
-  const author = raw.author || raw.user || raw.reviewer || raw.authorName || raw.userName || raw.name;
-  const rating = raw.rating ?? raw.stars ?? raw.score ?? raw.grade ?? raw.ratingValue;
-  return text.length >= 3 && Boolean(author || rating);
+function normalizedKey(value = '') {
+  return clean(value)
+    .toLocaleLowerCase('ru-RU')
+    .replace(/[«»"'`´’]/g, '')
+    .replace(/[^a-zа-яё0-9]+/gi, ' ')
+    .trim();
 }
 
-function collectReviewObjects(value, found = [], seen = new WeakSet()) {
+function isStrictYandexReview(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return false;
+
+  // У настоящего отзыва Яндекс.Карт есть текст отзыва, автор и служебные
+  // признаки отзыва. Обычные карточки организаций, акции и рекламные блоки
+  // сюда не проходят.
+  const text = clean(raw.text || raw.comment || raw.reviewText || raw.reviewBody || '');
+  const author = raw.author || raw.user || raw.reviewer || raw.account || raw.profile;
+  const authorName = clean(raw.authorName || raw.userName || author?.name || author?.displayName || author?.publicName || '');
+  const ratingRaw = raw.rating ?? raw.stars ?? raw.score ?? raw.grade ?? raw.ratingValue;
+  const rating = Number(ratingRaw);
+  const hasReviewIdentity = Boolean(raw.reviewId || raw.review_id || raw.uuid || raw.id);
+  const hasReviewDate = Boolean(raw.updateTime || raw.updatedAt || raw.createTime || raw.createdAt || raw.date || raw.datetime || raw.publishedAt);
+
+  return text.length >= 3 && authorName.length >= 1 && Number.isFinite(rating) && rating >= 1 && rating <= 5 && (hasReviewIdentity || hasReviewDate);
+}
+
+function collectStrictReviewObjects(value, found = [], seen = new WeakSet()) {
   if (!value || typeof value !== 'object' || seen.has(value)) return found;
   seen.add(value);
-  if (looksLikeReview(value)) found.push(value);
-  if (Array.isArray(value)) for (const item of value) collectReviewObjects(item, found, seen);
-  else for (const child of Object.values(value)) collectReviewObjects(child, found, seen);
+  if (isStrictYandexReview(value)) found.push(value);
+  if (Array.isArray(value)) {
+    for (const item of value) collectStrictReviewObjects(item, found, seen);
+  } else {
+    for (const child of Object.values(value)) collectStrictReviewObjects(child, found, seen);
+  }
   return found;
 }
 
 function normalizeReview(raw, index = 0) {
   const author = asObject(raw.author || raw.user || raw.reviewer || raw.account || raw.profile);
-  const name = clean(raw.authorName || raw.userName || raw.name || raw.displayName || author.name || author.displayName || author.publicName || author.fullName || 'Гость');
-  const text = clean(raw.text || raw.comment || raw.reviewText || raw.body || raw.description || raw.content || raw.pros || '');
-  const dateRaw = raw.updateTime || raw.updatedAt || raw.createTime || raw.createdAt || raw.date || raw.time || raw.datetime || raw.publishedAt || raw.publicationTime;
+  const name = clean(raw.authorName || raw.userName || author.name || author.displayName || author.publicName || author.fullName || 'Гость');
+  const text = clean(raw.text || raw.comment || raw.reviewText || raw.reviewBody || '');
+  const dateRaw = raw.updateTime || raw.updatedAt || raw.createTime || raw.createdAt || raw.date || raw.datetime || raw.publishedAt || raw.publicationTime;
   const avatarObj = asObject(author.avatar || author.photo);
-  const avatar = clean(raw.authorAvatar || raw.avatarUrl || raw.avatar || author.avatarUrl || author.photoUrl || avatarObj.url || avatarObj.href || '');
+  const avatar = clean(raw.authorAvatar || raw.avatarUrl || author.avatarUrl || author.photoUrl || avatarObj.url || avatarObj.href || '');
   const rating = Math.max(1, Math.min(5, Math.round(Number(raw.rating ?? raw.stars ?? raw.score ?? raw.grade ?? raw.ratingValue ?? 5) || 5)));
-  const id = clean(raw.reviewId || raw.id || raw.uuid || raw.permalink || `${name}-${dateRaw || index}-${text.slice(0, 50)}`);
+  const id = clean(raw.reviewId || raw.review_id || raw.uuid || raw.id || `${normalizedKey(name)}-${normalizedKey(text).slice(0, 80)}`);
   return { id, name, text, date: normalizeDate(dateRaw), avatar, rating };
 }
 
-function extractReviewsFromJson(json) { return deduplicate(collectReviewObjects(json).map(normalizeReview)); }
+function extractReviewsFromJson(json) {
+  return deduplicate(collectStrictReviewObjects(json).map(normalizeReview));
+}
 
 function deduplicate(items) {
-  const seen = new Set(); const result = [];
+  const seen = new Set();
+  const result = [];
   for (const item of items) {
     if (!item?.text || !item?.name) continue;
-    const key = item.id || `${item.name}|${item.date}|${item.text}`;
-    if (seen.has(key)) continue;
-    seen.add(key); result.push(item);
+    // Не используем ID как главный ключ: один и тот же отзыв может прийти
+    // из XHR и DOM с разными служебными ID.
+    const key = `${normalizedKey(item.name)}|${normalizedKey(item.text)}`;
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    result.push(item);
   }
   return result.slice(0, MAX_REVIEWS);
 }
@@ -163,13 +189,17 @@ async function scrapeYandex() {
   cdp.on('Network.responseReceived', event => {
     const { response, requestId, type } = event;
     const url = response.url || '';
-    const interesting = /review|business|organization|card|discovery|ajax|search|maps/i.test(url);
-    if (interesting && diagnostics.candidateUrls.length < 150) {
+    const isTargetReviewRequest =
+      /fetchReviews|businessReviews|reviews/i.test(url) &&
+      (url.includes(ORG_ID) || /businessId|business_id|orgId|organizationId/i.test(url));
+
+    if (isTargetReviewRequest && diagnostics.candidateUrls.length < 150) {
       diagnostics.candidateUrls.push(`${Math.round(response.status)} ${type} ${url}`);
     }
+    if (!isTargetReviewRequest) return;
     if (response.status < 200 || response.status >= 400) return;
-    if (!['XHR', 'Fetch', 'Document', 'Script'].includes(type)) return;
-    if (!/json|javascript|text|octet-stream/i.test(response.mimeType || '')) return;
+    if (!['XHR', 'Fetch'].includes(type)) return;
+    if (!/json|text|octet-stream/i.test(response.mimeType || '')) return;
 
     const task = new Promise(resolve => setTimeout(resolve, 80))
       .then(() => inspectBody(requestId, url, response.mimeType))
@@ -181,6 +211,9 @@ async function scrapeYandex() {
     await page.goto(REVIEWS_URL, { waitUntil: 'domcontentloaded', timeout: 90_000 });
     await page.waitForTimeout(7_000);
     diagnostics.title = await page.title().catch(() => '');
+    if (!diagnostics.title.toLocaleLowerCase('ru-RU').includes('кенгуру')) {
+      throw new Error(`Открылась не карточка клуба «Кенгуру»: ${diagnostics.title || 'без заголовка'}`);
+    }
 
     for (const selector of [
       'button[aria-label="Закрыть"]',
@@ -341,6 +374,6 @@ app.get('/api/reviews', async (req, res) => {
 app.get('*', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'index.html')));
 
 app.listen(PORT, () => {
-  console.log(`Kenguru reviews CDP v4 running on port ${PORT}`);
+  console.log(`Kenguru reviews strict v5 running on port ${PORT}`);
   refreshReviews(false).catch(error => console.error('Первичное обновление:', error.message));
 });
