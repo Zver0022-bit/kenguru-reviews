@@ -16,12 +16,6 @@ const escapeHtml = (value = '') => String(value).replace(/[&<>'"]/g, char => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
 }[char]));
 
-const demoReviews = [
-  { name: 'Мария', rating: 5, text: 'Тренеры внимательные, всегда подберут программу под цели и уровень. Очень приятная атмосфера и отличный клуб.', date: '18 мая 2025' },
-  { name: 'Алексей', rating: 5, text: 'Отличный клуб! Здесь тебя действительно понимают и создают классную атмосферу.', date: '15 мая 2025' },
-  { name: 'Дмитрий', rating: 5, text: 'Удобная запись, напоминания, приятные бонусы. Всё на высшем уровне.', date: '14 мая 2025' },
-  { name: 'Екатерина', rating: 5, text: 'Очень тёплое отношение к игрокам. Хочется приходить снова и снова!', date: '12 мая 2025' }
-];
 
 function render() {
   track.innerHTML = reviews.map((review, cardIndex) => {
@@ -136,16 +130,10 @@ document.addEventListener('keydown', event => {
 });
 
 async function loadReviews() {
-  // Сразу показываем карусель, чтобы блок никогда не зависал на «Загружаем отзывы…».
-  if (!reviews.length) {
-    reviews = demoReviews;
-    render();
-    restartAutoplay();
-    statusEl.textContent = '';
-  }
+  statusEl.textContent = reviews.length ? '' : 'Загружаем реальные отзывы из Яндекс Карт…';
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 8000);
+  const timeoutId = setTimeout(() => controller.abort(), 30000);
 
   try {
     const response = await fetch('/api/reviews', {
@@ -155,7 +143,10 @@ async function loadReviews() {
     });
     const data = await response.json();
     const received = data.reviews?.length ? data.reviews : data.cached || [];
-    if (!received.length) return;
+
+    if (!response.ok || !received.length) {
+      throw new Error(data.message || 'Яндекс Карты временно не вернули отзывы');
+    }
 
     reviews = received;
     index = Math.min(index, reviews.length - 1);
@@ -163,8 +154,12 @@ async function loadReviews() {
     restartAutoplay();
     statusEl.textContent = '';
   } catch (error) {
-    // Оставляем уже показанную карусель. Следующая попытка произойдёт автоматически.
     console.warn('Отзывы Яндекс временно недоступны:', error?.message || error);
+    if (!reviews.length) {
+      track.innerHTML = '';
+      dots.innerHTML = '';
+      statusEl.textContent = 'Отзывы временно не удалось загрузить из Яндекс Карт.';
+    }
   } finally {
     clearTimeout(timeoutId);
   }
